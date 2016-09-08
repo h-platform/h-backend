@@ -1,8 +1,8 @@
-/**
-* Dependencies.
-*/
 var Hapi = require('hapi');
 var config = require('config');
+var glob = require("glob");
+var l = require('./logger.js');
+var _ = require('lodash');
 
 // Create a new server
 var server = new Hapi.Server();
@@ -73,23 +73,10 @@ server.register([
         }
     },
     {
-        register: require('vision'),
-    },
-    {
         register: require('inert'),
     },
     {
-        register: require("hapi-assets"),
-        options: require('./assets.js')
-    },
-    {
-        register: require("hapi-named-routes")
-    },
-    {
         register: require("hapi-cache-buster")
-    },
-    {
-        register: require('./pods/assets/routes.js')
     },
     {
         register: require('./pods/main/routes.js')
@@ -97,19 +84,28 @@ server.register([
     {
         register: require('./pods/login/routes.js')
     }
+    // {
+    //     register: require('./models/queue.js')
+    // },
+    // {
+    //     register: require('./models/post.js')
+    // }
 ], function (err) {
 
     if (err) {
         throw err;
     }
 
-    //Vision Settings
-    server.views({
-        engines: { 
-            html: require('swig')
-        },
-        relativeTo: __dirname,
-        path: './views'
+    glob("./models/*.js", {}, function (er, files) {
+      // files is an array of filenames.
+      _.each(files, function(file){
+        var model_name = _.camelCase(file);
+        model_name = _.replace(model_name, "models","");
+        model_name = _.replace(model_name, "Js", "");
+        model_name = _.snakeCase(model_name);
+        l.info("found model: ", model_name, "from", file);
+        server.register([{register: require(file)}]);
+      });
     });
 
     //Start the server

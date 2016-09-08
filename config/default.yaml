@@ -6,7 +6,11 @@
 #     with an @override tag.
 ###
 server:
-  port: 3000
+  port: 3010
+
+api:
+  base_server_url: "https://hlab.dev"
+  base_api_url: "/jsonapi"
 
 ###
 # Logging configuration for application. Only directory for logs

@@ -13,8 +13,7 @@
     "node": "0.10.x"
   },
   "scripts": {
-    "start": "supervisor --extensions 'node,js,html,css' server.js",
-    "postinstall": "bower install"
+    "start": "supervisor --extensions 'node,js,html,css' server.js"
   },
   "dependencies": {
     "bell": "^7.2.0",
@@ -29,17 +28,15 @@
     "hapi": "^13.0.0",
     "hapi-assets": "~0.3.0",
     "hapi-auth-cookie": "^6.1.1",
-    "hapi-bookshelf-models": "^1.7.1",
     "hapi-cache-buster": "~0.4.0",
     "hapi-named-routes": "~0.3.0",
+    "i": "^0.3.5",
     "inert": "^3.2.0",
     "joi": "^8.0.2",
     "js-yaml": "^3.5.3",
     "lodash": "^4.5.0",
     "mkdirp": "^0.5.1",
     "seneca": "^1.2.0",
-    "swig": "~1.4.2",
-    "vision": "^4.0.1",
     "winston": "^2.1.1"
   },
   "devDependencies": {

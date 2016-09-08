@@ -4,40 +4,14 @@ exports.register = function(server, options, next){
     server.route([
         {
             method: 'GET',
-            path: '/',
-            config: {
-                auth: { mode: 'try' },
-                handler: controller.getIndex
-            }
-        }, {
-            method: 'GET',
-            path: '/posts/{id}',
-            config: {
-                auth: 'session',
-                handler: controller.getPost
-            }
-        }, {
-            method: 'GET',
-            path: '/posts/{id}/edit',
-            config: {
-                auth: 'session',
-                handler: controller.postEdit
-            }
-        }, {
-            method: 'POST',
-            path: '/post/{id}/edit',
-            config: {
-                auth: 'session',
-                handler: controller.processPostEdit
-            }
-        }, {
-            method: 'GET',
             path: '/{path*}',
             config: {
+                auth: false,
                 handler: function(request, reply){
-                    reply.view('404', {
-                        title: 'Total Bummer 404 Page'
-                    }).code(404);
+                    reply({"error": "resource not found"}, 404)
+                      .code(404)
+                      .header('Access-Control-Allow-Origin','*')
+                      .header('Content-Type', 'application/vnd.api+json');
                 },
                 id: '404'
             }

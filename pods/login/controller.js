@@ -17,7 +17,7 @@ exports.loginScreen = function(request, reply) {
         }
     }
 
-    reply.view('user/login', {next: request.query.next});
+    reply.view({'error':'Login required'});
 };
 
 
