@@ -3,6 +3,7 @@ var config = require('config');
 var glob = require("glob");
 var l = require('./logger.js');
 var _ = require('lodash');
+var JWT_SECRET  = process.env.JWT_SECRET || "o8fup9w8#$GW%Y#$^U&35y3%Yw35yE#Y#Yu4pf9pjw98epfaw8ofioawufe@#eFSADFASDFAS";
 
 // Create a new server
 var server = new Hapi.Server();
@@ -14,88 +15,47 @@ server.connection({
 });
 
 
-//Session authentication scheme
-server.register(require('hapi-auth-cookie'), (err) => {
-
-    if (err) {
-        throw err;
-    }
-
-    const cache = server.cache({ segment: 'sessions', expiresIn: 3 * 24 * 60 * 60 * 1000 });
-    server.app.cache = cache;
-
-    server.auth.strategy('session', 'cookie', true, {  
-        password: 'b252cbedbe1b81efc660cc15df003aa6',
-        isSecure: false,
-        isHttpOnly: true,
-        cookie: 'sid',
-        redirectOnTry: false,
-        redirectTo: '/user/login',
-        appendNext: true
-    });
-});
-
-
-//Session authentication scheme
-server.register(require('bell'), (err) => {
-
-    if (err) {
-        throw err;
-    }
-
-    server.auth.strategy('facebook', 'bell', {  
-        provider: 'facebook',
-        isSecure: false,
-        password: 'b252cbedbe1b81efc660cc15df003aa6',
-        clientId: '193712611002614',
-        clientSecret: 'e2f85f697f00637d4740176f6eabd78d'
-    });
-});
-
-
-// Export the server to be required elsewhere.
-module.exports = server;
-
 /*
     Load all plugins and then start the server.
     First: community/npm plugins are loaded
     Second: project specific plugins are loaded
- */
+*/
 server.register([
     {
-        register: require("good"),
+        register: require('good'),
         options: {
-            opsInterval: 5000,
-            reporters: [{
-                reporter: require('good-console'),
-                args:[{ ops: '*', request: '*', log: '*', response: '*', 'error': '*' }]
-            }]
+            ops: {
+                interval: 1000
+            },
+            reporters: {
+                myConsoleReporter: [{
+                    module: 'good-squeeze',
+                    name: 'Squeeze',
+                    args: [{ log: '*', response: '*' }]
+                }, {
+                    module: 'good-console'
+                }, 'stdout']
+            }
         }
-    },
-    {
+    },{
         register: require('inert'),
+    }, {
+        register: require('hapi-auth-jwt2')
+    }, {
+        register: require('./pods/user-managment/routes.js')
     },
-    {
-        register: require("hapi-cache-buster")
-    },
-    {
-        register: require('./pods/main/routes.js')
-    },
-    {
-        register: require('./pods/login/routes.js')
-    }
-    // {
-    //     register: require('./models/queue.js')
-    // },
-    // {
-    //     register: require('./models/post.js')
-    // }
 ], function (err) {
 
     if (err) {
+        server.log('error', 'failed to install plugins')
         throw err;
     }
 
+
+    // server.register(require('./pods/user-managment/routes.js'));
+    // server.register(require('./pods/main/routes.js'));
+
+    //Generate routes for models in "/models" folder
     glob("./models/*.js", {}, function (er, files) {
       // files is an array of filenames.
       _.each(files, function(file){
@@ -114,3 +74,6 @@ server.register([
         console.log('Server started at: ' + server.info.uri);
     });
 });
+
+// Export the server to be required elsewhere.
+module.exports = server;

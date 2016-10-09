@@ -4,57 +4,65 @@ var client = seneca.client('10102');
 
 var config = require('config');
 var l = require('../../logger');
+var Boom = require('boom');
 
-// shows the different login options for the user
-// --------------------------------------------------------------
-exports.loginScreen = function(request, reply) {
-    // User is now logged in, redirect them to their account area
-    if(request.auth.isAuthenticated) {
-        if(request.query.next) {
-            return reply.redirect(request.query.next);
-        } else {
-            return reply.redirect('/');
-        }
-    }
+var promise = require('bluebird');
+client.actAsync = promise.promisify(client.act, {
+    multiArgs: false,
+    context: client
+});
 
-    reply.view({'error':'Login required'});
-};
-
-
+var uuid = 1;
 
 
 // login using local database
 // --------------------------------------------------------------
-exports.loginManual = function (request, reply) {
+exports.loginLocal = function (request, reply) {
+    console.log('POST /user/login/local ------->', request.auth);
     if (!request.payload.username || !request.payload.password) {
-        message = 'Missing username or password';
-        return reply.view('user/login', {message: message});
+        message = 'Missing username or password fields';
+        return reply(Boom.badRequest(message))
+            .header('Access-Control-Allow-Origin','*')
+            .header('Access-Control-Allow-Methods', 'OPTIONS,POST')
+            .header('Access-Control-Allow-Headers', 'Content-Type');
     }
 
-    client.act({ role:'auth', model: 'user', cmd:'validate', data: request.payload }, function (err, response) {
-        if(err) {
-            console.log(err);
-            return reply.view('user/login', { message: 'some error occured' });
-        }
-        
-        //double check user is found and valid
-        if (!response.user) {
-            message = 'Invalid username or password';
-            return reply.view('user/login', { message: message });
-        }
+    client.actAsync({ role:'auth', model: 'user', cmd:'validate', data: request.payload })
+        .then(function(response){
+            //check user is found and valid
+            if (!response.user) {
+                console.log('Bad username or password');
+                return reply(Boom.unauthorized('Bad username or password'))
+                    .header('Access-Control-Allow-Origin','*')
+                    .header('Access-Control-Allow-Methods', 'OPTIONS,POST')
+                    .header('Access-Control-Allow-Headers', 'Content-Type');
+            } else {
+                // This will set the cookie and declare log in success
+                const sid = String(++uuid);
+                request.server.app.cache.set(sid, { account: response.user }, 0, (err) => {
 
-        // This will set the cookie during the redirect and 
-        // log them into your application.
-        request.cookieAuth.set(response.user);
+                    if (err) {
+                        reply(err);
+                    }
 
-
-        // User is now logged in, redirect them to their account area
-        if(request.query.next) {
-            return reply.redirect(request.query.next);
-        } else {
-            return reply.redirect('/');
-        }
-    });
+                    console.log('POST /user/login/local ------->', request.auth);
+                    request.cookieAuth.set({ sid: sid });
+                    reply({message: 'success'})
+                    .header('Access-Control-Allow-Origin','*')
+                    .header('Access-Control-Allow-Methods', 'OPTIONS,POST')
+                    .header('Access-Control-Allow-Headers', 'Content-Type');
+                });
+                // console.log('User logged in successfully',response.user);
+                // request.cookieAuth.set(response.user);
+            }
+        })
+        .catch(function(err){
+            console.log('error occured', err);
+            return reply(Boom.unauthorized(err))
+                .header('Access-Control-Allow-Origin','*')
+                .header('Access-Control-Allow-Methods', 'OPTIONS,POST')
+                .header('Access-Control-Allow-Headers', 'Content-Type');
+        });
 };
 
 
@@ -63,10 +71,19 @@ exports.loginManual = function (request, reply) {
 // render user profile
 // --------------------------------------------------------------
 exports.profile = function (request, reply) {
-    l.info('request.auth object:', request.auth);
-    return reply.view('user/profile', {
-        auth: request.auth,
-    });
+    console.log('GET /user/me ------->', request.auth);
+    return reply({user: request.auth.credentials});
+};
+
+
+
+
+// logout the system
+// --------------------------------------------------------------
+exports.logout = function (request, reply) {
+    request.cookieAuth.clear();
+    console.log('GET /user/logout ------->', request.auth);
+    return reply({msg: 'Logged out successfuly', auth:request.auth});
 };
 
 
@@ -98,11 +115,7 @@ exports.loginFacebook = function (request, reply) {
         request.cookieAuth.set(response.user);
 
         // User is now logged in, redirect them to their account area
-        if(request.auth.credentials.query.next) {
-            return reply.redirect(request.auth.credentials.query.next);
-        } else {
-            return reply.redirect('/');
-        }
+        reply({msg: 'Login Successful'});
     });
 };
 
@@ -112,29 +125,31 @@ exports.loginFacebook = function (request, reply) {
 // login using google
 // --------------------------------------------------------------
 exports.loginGoogle = function (request, reply) {
-    l.log('Login handler for google is called');
-
-    // Here we take the profile that was kindly pulled in
-    // by bell and set it to our cookie session.
-    // This will set the cookie during the redirect and 
-    // log them into your application.
-    request.cookieAuth.set(request.auth.credentials.profile);
-
-    // User is now logged in, redirect them to their account area
-    if(request.query.next) {
-        return reply.redirect(request.query.next);
-    } else {
-        return reply.redirect('/');
+    l.log('Login handler for facebook is called');
+    
+    if (!request.auth.isAuthenticated) {
+        return reply('Authentication failed due to: ' + request.auth.error.message);
     }
+
+    // Perform account lookup or registration, then setup local session,
+    // and redirect to the application. 
+
+    // The third-party credentials are stored in request.auth.credentials.
+    // Any query parameters from the initial request are passed back via request.auth.credentials.query.
+    var profile = request.auth.credentials.profile;
+    
+    // findOrCreateUser in database
+    client.act({ role:'auth', model:'user', cmd:'findOrCreate', data: { facebook_id: profile.id, email: profile.email, display_name: profile.displayName} }, function (err, response) {
+        console.log('>>>>>>> found user', response);
+        // Here we take the profile that was kindly pulled in
+        // by bell and set it to our cookie session.
+        // This will set the cookie during the redirect and 
+        // log them into your application.
+        request.cookieAuth.set(response.user);
+
+        // User is now logged in, redirect them to their account area
+        reply({msg: 'Login Successful'});
+    });
 };
 
 
-
-
-// logout the system
-// --------------------------------------------------------------
-exports.logout = function (request, reply) {
-    // Clear the cookie
-    request.cookieAuth.clear();
-    return reply.redirect('/');
-};
