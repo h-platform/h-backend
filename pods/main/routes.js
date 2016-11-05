@@ -4,6 +4,13 @@ exports.register = function(server, options, next){
     server.route([
         {
             method: 'GET',
+            path: '/api/views/queues_with_count',
+            config: {
+                auth: false,
+                handler: controller.getQueuesWithPostCount
+            }
+        },{
+            method: 'GET',
             path: '/{path*}',
             config: {
                 auth: false,

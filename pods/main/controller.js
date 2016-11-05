@@ -6,24 +6,9 @@ var client = seneca.client();
 
 // shows the different login options for the user
 // --------------------------------------------------------------
-exports.getIndex = function(request, reply){
-    console.log('>>>> request.auth >>>>', request.auth);
-
-    // Set Default Queue
-    if(!request.query.queue_id) {
-        request.query.queue_id = 1;
-    }
-
+exports.getQueuesWithPostCount = function(request, reply){
     client.act({ role:'database', model: 'queue', cmd:'queryRecords', view: 'with_post_counts' }, function (err, result) {
-        client.act({ role:'database', model: 'post', cmd:'queryRecords', where: [{col:'queue_id' , op: '=', val: request.query.queue_id}] }, function (err, result2) {
-            // console.log(result2.records);
-            reply.view('index', {
-                auth: request.auth,
-                active_queue: request.query.queue_id,
-                queue_list: result.records,
-                post_list: result2.records
-            });
-        });
+        reply(result);
     });
 };
 

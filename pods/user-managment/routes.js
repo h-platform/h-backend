@@ -4,24 +4,82 @@ var url         = require('url');   // node core!
 var JWT_SECRET  = process.env.JWT_SECRET || "o8fup9w8#$GW%Y#$^U&35y3%Yw35yE#Y#Yu4pf9pjw98epfaw8ofioawufe@#eFSADFASDFAS";
 var Boom        = require('boom');
 var Joi         = require('joi');
+var seneca      = require('seneca')();
+var client      = seneca.client('10102');
+var l           = require('../../logger');
 
 
 
 
-var users = { // our "users database" 
-    admin: {
-      id: 1,
-      fullname: 'Administrator',
-      username: 'admin',
-      password: '1234'
-    },
-    user1: {
-      id: 2,
-      fullname: 'User One',
-      username: 'user1',
-      password: '1234'
-    },
+
+var promise = require('bluebird');
+client.actAsync = promise.promisify(client.act, {
+    multiArgs: false,
+    context: client
+});
+
+
+
+
+
+
+// var controller  = require('./controller');
+
+var controller = {
+  login: function(request, reply) {
+    client.actAsync({ role:'auth', model: 'user', cmd:'validate', data: request.payload })
+      .then(function(response){
+        //check user is found and valid
+        if (!response.user) {
+            l.warn('Bad username or password');
+            return reply(Boom.unauthorized('Bad username or password'));
+        } else {
+          var user = response.user;
+          var session = createSessionAndSaveToRedis(user);
+
+          // sign the session as a JWT
+          var token = JWT.sign(session, JWT_SECRET); // synchronous
+          l.debug('created new token:', token);
+
+          reply({text: 'Check Auth Header for your Token', access_token: token})
+          .header("authorization", token);
+        }
+      })
+      .catch(function(err){
+        console.log('error occured during login', err);
+        return reply(Boom.unauthorized(err.details.message));
+      });
+  },
+
+
+  logout: function(request, reply) {
+    // l.debug('logout: auth object:', request.auth);
+    // var decoded = JWT.decode(request.headers.authorization,JWT_SECRET);
+    // l.debug('logout: decoded token: ', decoded);
+    l.debug('logout: tying to remove session from redis', request.auth.credentials);
+    redisClient.get(request.auth.credentials.session_id, function(rediserror, redisreply) {
+      /* istanbul ignore if */
+      if(rediserror) {
+        l.error('logout: Redis error during logout',rediserror);
+      }
+      var session = JSON.parse(redisreply);
+      l.debug('logout: found session in redis:',session);
+      // Delete session in Redis
+      redisClient.del(session.session_id);
+      redisClient.del(session.username);
+      l.debug('logout: deleted session from redis:',session);
+      reply({msg: 'You have been logged out!'});
+    });
+  }
 };
+
+
+
+
+
+
+
+
 
 
 
@@ -44,23 +102,25 @@ redisClient.get('redis', function (rediserror, reply) {
 
 
 
-// validatin function to check session exsists in redis
+//validatin function to check session exsists in redis
 var validate = function (decoded, request, callback) {
-  console.log(" - - - - - - - DECODED token:");
-  console.log(decoded);
+  l.debug('Validate JWT Token: Decoded Token', decoded);
   // do your checks to see if the session is valid
   redisClient.get(decoded.session_id, function (rediserror, reply) {
     /* istanbul ignore if */
     if(rediserror) {
-      console.log(rediserror);
+      l.error('Validate JWT Token: Redis error during validation ', rediserror);
     }
 
-    console.log(' - - - - - - - REDIS reply - - - - - - - ', reply);
+    l.debug('Validate JWT Token: Found value in redis', reply);
+    
     if(!reply) {
+      l.debug('Validate JWT Token: Invalid value from redis', reply);
       return callback(rediserror, false);
     }
 
     var session = JSON.parse(reply);
+    l.debug('Validate JWT Token: token.valid = ',session.valid);
     if (session.valid === true) {
       return callback(rediserror, true);
     } else {
@@ -70,6 +130,52 @@ var validate = function (decoded, request, callback) {
   });
 };
 
+
+
+
+
+
+//Create new session object for the provided user with session_id
+//Save the session object to redis db with session_id as a key
+//Clear previous session for user
+//Link the user with new session object
+
+var createSessionAndSaveToRedis = function (user) {
+  //create new session
+  var session = {
+    valid: true, // this will be set to false when the person logs out
+    session_id: aguid(), // a random session id
+    exp: new Date().getTime() + 30 * 60 * 1000, // expires in 30 minutes time
+    user_id: user.id,
+    username: user.username,
+  };
+
+  //create the session in Redis
+  redisClient.set(session.session_id, JSON.stringify(session));
+  l.debug('Redis: Created new session for user:', session);
+  
+  //destroy previous sessions for user if found
+  redisClient.get(user.username, function(rediserror, redisreply) {
+    /* istanbul ignore if */
+    if(rediserror) {
+      l.error('Redis: Error during removing old session for user:',rediserror);
+    }
+
+    var username_session = JSON.parse(redisreply);
+    if(username_session){
+      l.debug('Redis: Found old session linked to user:', username_session);
+      // update the session to no longer valid:
+      redisClient.del(username_session.session_id);
+      l.debug('Redis: Removed old session which was linked to user:', username_session);
+    }
+  });
+
+  //update username active session
+  redisClient.set(session.username, JSON.stringify(session));
+  l.debug('Redis: Linked new session for user:', session);
+
+  return session;
+};
 
 
 
@@ -93,20 +199,8 @@ exports.register = function (server, options, next) {
 
   server.route([
     {
-      method: 'OPTIONS', 
-      path: '/api/user', 
-      config: {
-        auth: false
-      },
-      handler: function(request, reply) {
-        reply({})
-        .header('Access-Control-Allow-Origin','*')
-        .header('Access-Control-Allow-Methods', 'OPTIONS,GET')
-        .header('Access-Control-Allow-Headers', ['Content-Type', 'Authorization', 'Accept']);
-      }
-    },{
       method: 'GET', 
-      path: '/api/user', 
+      path: '/api/user/me', 
       config: {
         cors: true,
         auth: {
@@ -115,57 +209,20 @@ exports.register = function (server, options, next) {
         }
       },
       handler: function(request, reply) {
-        reply({text: 'user Info', auth: request.auth})
-        .header('Access-Control-Allow-Origin','*')
+        reply({auth: request.auth})
         .header("Authorization", request.headers.authorization);
       }
     }, {
-      method: 'OPTIONS', 
-      path: '/api/user/me', 
-      config: {
-        auth: false
-      },
-      handler: function(request, reply) {
-        reply({})
-        .header('Access-Control-Allow-Origin','*')
-        .header('Access-Control-Allow-Methods', 'OPTIONS,GET')
-        .header('Access-Control-Allow-Headers', ['Content-Type', 'Authorization', 'Accept']);
-      }
-    }, {
-      method: 'GET', 
-      path: '/api/user/me', 
-      config: {
-        cors: true,
-        auth: 'jwt'
-      },
-      handler: function(request, reply) {
-        reply({text: 'You used a Token!', auth: request.auth})
-        .header('Access-Control-Allow-Origin','*')
-        .header("Authorization", request.headers.authorization);
-      }
-    }, {
-      method: 'OPTIONS', 
-      path: '/api/user/login', 
-      config: {
-        auth: false
-      },
-      handler: function(request, reply) {
-        reply({})
-        .header('Access-Control-Allow-Origin','*')
-        .header('Access-Control-Allow-Methods', 'OPTIONS,POST')
-        .header('Access-Control-Allow-Headers', ['content-type', 'authorization', 'accept']);
-      }
-    },
-    {
       /*
         Implement login function here.
         1\ check username and password valuse are valid (joi)
-        2\ find user from db
+        2\ find user from auth micro service
         3\ validate passowrd
-        4\ create session and save to redis with session_id as key
-        5\ get old session and remove it from redit using username lookup
-        6\ update username's lookup active session in redis with new one
-        7\ create token which is signed session using JWT
+        4\ createSessionAndSaveToRedis
+          4.1\ create session and save to redis with session_id as key
+          4.2\ get old session and remove it from redit using username lookup
+          4.3\ update username's lookup active session in redis with new one
+          4.4\ create token which is signed session using JWT
         8\ reply success with new token in authorization header.
       */
       method: 'POST',
@@ -183,72 +240,8 @@ exports.register = function (server, options, next) {
           }
         }
       },
-      handler: function(request, reply) {
-        console.log(request.payload);
-
-        // find user from local variable
-        request.payload.username = request.payload.email;
-        var user = users[request.payload.username];
-
-        //check user exsists
-        if(!user){
-          return reply(Boom.unauthorized('invalid username'));
-        }
-
-
-        //check password is valid
-        if(user.password != request.payload.password){
-          return reply(Boom.unauthorized('invalid password'));
-        }
-
-        //create new session
-        var session = {
-          valid: true, // this will be set to false when the person logs out
-          session_id: aguid(), // a random session id
-          exp: new Date().getTime() + 30 * 60 * 1000, // expires in 30 minutes time
-          user_id: user.id,
-          username: user.username,
-        }
-
-        // create the session in Redis
-        redisClient.set(session.session_id, JSON.stringify(session));
-        //destroy previous sessions for user
-        redisClient.get(user.username, function(rediserror, redisreply) {
-          /* istanbul ignore if */
-          if(rediserror) {
-            console.log(rediserror);
-          }
-          if(username_session = JSON.parse(redisreply)){
-            console.log(' - - - - - - OLD Username SESSION - - - - - - - -')
-            console.log(username_session);
-            // update the session to no longer valid:
-            redisClient.del(username_session.session_id);
-          }
-        });
-
-        //update username active session
-        redisClient.set(session.username, JSON.stringify(session));
-
-        // sign the session as a JWT
-        var token = JWT.sign(session, JWT_SECRET); // synchronous
-        console.log(token);
-
-        reply({text: 'Check Auth Header for your Token', access_token: token})
-        .header("authorization", token);
-      }
+      handler: controller.login
       
-    }, {
-      method: 'OPTIONS', 
-      path: '/api/user/logout', 
-      config: {
-        auth: false
-      },
-      handler: function(request, reply) {
-        reply({})
-        .header('Access-Control-Allow-Origin','*')
-        .header('Access-Control-Allow-Methods', 'OPTIONS,POST')
-        .header('Access-Control-Allow-Headers', ['Content-Type', 'Authorization', 'Accept']);
-      }
     }, {
       /*
         1- any invalid token will not be processed, because we set auth mode to jwt/required
@@ -257,31 +250,11 @@ exports.register = function (server, options, next) {
       */
       method: 'POST',
       path: "/api/user/logout",
-      config: { 
-        cors: true,
+      config: {
         auth: 'jwt'
       },
-      handler: function(request, reply) {
-        var decoded = JWT.decode(request.headers.authorization,JWT_SECRET);
-        console.log(decoded);
-        var session;
-        redisClient.get(decoded.session_id, function(rediserror, redisreply) {
-          /* istanbul ignore if */
-          if(rediserror) {
-            console.log(rediserror);
-          }
-          session = JSON.parse(redisreply)
-          console.log(' - - - - - - SESSION - - - - - - - -')
-          console.log(session);
-          // create the session in Redis
-          redisClient.del(session.session_id);
-          redisClient.del(session.username);
-
-          reply({text: 'You have been logged out!'})
-        })
-      }
-    },
-    { 
+      handler: controller.logout
+    }, { 
       // remove this method if you use this in PROD!
       method: 'GET', 
       path: '/end', 

@@ -17,18 +17,6 @@ client.actAsync = promise.promisify(client.act, {
 exports.register = function(server, options, next){
     server.route([
         {
-            method: 'OPTIONS',
-            path: '/user/login/local',
-            config: {
-                auth: false,
-                handler: function(request, reply){
-                    reply({})
-                    .header('Access-Control-Allow-Origin','*')
-                    .header('Access-Control-Allow-Methods', 'OPTIONS,POST')
-                    .header('Access-Control-Allow-Headers', 'Content-Type');
-                },
-            }
-        }, {
             method: 'POST',
             path: '/user/login/local',
             config: {

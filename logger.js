@@ -11,7 +11,10 @@ var winston = require("winston");
 var mkdirp = require('mkdirp');
 var config = require('config');
 var path = require('path');
-
+const tsFormat = () => (new Date())
+  .toISOString()
+  .replace(/T/, ' ')        // replace T with a space
+  .replace(/\..+/, '');     // delete the dot and everything after
 
 // Recursively create log directory if it does not exist
 mkdirp.sync(config.get('logging.directory'));
@@ -22,24 +25,28 @@ mkdirp.sync(config.get('logging.directory'));
  * debug level logs to console, and to save warning level
  * logs to file.
  *
- * @property
+ * @property 
  * @type winston.Logger
  */
 module.exports = new(winston.Logger)({
   transports: [
     new(winston.transports.Console)({
       handleExceptions: true,
+      level: 'debug',
       json: false,
-      colorize: true
+      colorize: true,
     }),
     new(winston.transports.File)({
-      filename: path.resolve(config.get('logging.directory'), 'server.log'),
-      level: 'debug',
       handleExceptions: true,
-      json: true,
+      level: 'debug',
+      json: false,
+      colorize: false,
+      tailable: true,
+      timestamp: tsFormat,
+      filename: path.resolve(config.get('logging.directory'), 'backend.log'),
       maxsize: 5242880, //5MB
       maxFiles: 10,
-      colorize: false
+      prettyPrint: true
     })
   ]
 });

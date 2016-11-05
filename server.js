@@ -37,7 +37,9 @@ server.register([
                 }, 'stdout']
             }
         }
-    },{
+    }, {
+        register: require('./pods/main/routes'),
+    }, {
         register: require('inert'),
     }, {
         register: require('hapi-auth-jwt2')
